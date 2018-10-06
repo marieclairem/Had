@@ -1,0 +1,209 @@
+Intel-IAH
+=========
+
+Artifacts for Intel IAH (Cloudera Hadoop) projects.
+
+# Main components
+* SFDC (Salesforce.com) data extraction
+* SFDC metadata (schema) extraction
+* Metadata (schema) persistence and CRUD operations - the metadata DB (MDDB)
+* Data ingestion into HDFS and Hive mappings based on schema
+* Merge / transform incremental data into full data views
+
+# Project layout
+Uses Maven, and follows Maven standard directory layout:
+* src/main/java - java source
+* src/main/scripts - all scripts
+* src/test/java - test code for java
+* src/test/scripts - test code for scripts
+
+Additional directories used:
+* bin - additional scripts
+* conf - configuration files (no passwords please!)
+* dataloader - SFDC extraction libs and shell wrappers
+* lib - preinstalled libraries for bootstrapping before Maven package complete
+
+# Setup Environment
+
+Run `bin/iah_setup.sh` script:
+run_install_git=1 \      # set up git install
+run_install_tools=1 \    # install tools locally, or use root account's install
+run_build=1 \            # run iah build inline
+run_configure_iah=1 \    # copy default user configuration
+run_install_iah=1 \      # run install script to create other structures
+run_install_keys=1 \     # install keys from conf
+bin/iah_setup.sh <project name> <root account>
+Adjust options as needed to enable / disable different features, or use shared install.
+
+# Maven
+Build with mvn (compile | test | package) on any POSIX compliant system.
+Note that the test goal also runs compile, and the package goal also runs
+compile and test.
+
+## Maven download and configuration
+Fetch maven from a binary package (maven.apache.org) and unpack if not already installed.
+For convenience, add the Maven bin directory to the PATH.
+
+If running behind a proxy (or proxy repository like Archiva),
+add the following to `~/.m2/settings.xml`,
+replacing proxy_host and proxy_port with appropriate values:
+```
+<settings>
+    ...
+    <proxies>
+        <proxy>
+            <active>true</active>
+            <protocol>http</protocol>
+            <host>proxy_host</host>
+            <port>proxy_port</port>
+            <username></username>
+            <password></password>
+            <nonProxyHosts></nonProxyHosts>
+        </proxy>
+    </proxies>
+    ...
+</settings>
+```
+# Build
+Build by running mvn compile from within the project directory.
+
+# Test
+## Test configuration
+Unit tests can be run with mvn test on any POSIX compliant system.
+It works with Cygwin, but not MINGW despite the presence of a bash shell. When
+using Cygwin, note that all paths are resolved by Java in the Windows
+environment. See example below.
+
+Testing requires initial configuration of the test metadata DB.
+1. Create a test directory, for example, tests, under your project home directory.
+2. Copy the `conf/iah_jdbc_config.txt` file to that test directory.
+3. Edit the test iah_jdbc_config.txt with the correct properties for the test SQLite
+database. All parameters (driver, url, user, password) must be listed, even if
+empty.
+
+Example JDBC config properties file under Cygwin, assuming the use of a tests
+directory under the Windows user home directory and SQLite DB:
+
+driver=org.sqlite.JDBC
+url=jdbc:sqlite:c:/Users/mkidwelx/tests/sqlite.iah.db
+user=
+password=
+
+Note: If the test DB is not SQLite, the "dbtype" property must also be
+specified in the config. Look in ddl/metadata for valid DB types (mssql,h2,sqlite).
+
+4. The Maven test code needs to know where the iah_jdbc_config lives, as well
+as any proxy settings in use. The proxy settings set here should match those
+in the above proxies section.
+
+Set up a dev or test active profile in `~/.m2/settings.xml` pointing to them:
+```
+<settings>
+    ...
+    <profiles>
+        <profile>
+            <id>env-dev</id>
+            <properties>
+                <user.iah_jdbc_config>${user.home}/tests/iah_jdbc_config.txt</user.iah_jdbc_config>
+    <user.http_proxy_host>host_name</user.http_proxy_host>
+    <user.http_proxy_port>port</user.http_proxy_port>
+            </properties>
+        </profile>
+
+    </profiles>
+    <activeProfiles>
+        <activeProfile>env-dev</activeProfile>
+    </activeProfiles>
+</settings>
+```
+
+## Maven unit tests
+Run mvn test. The end of the test will display "BUILD SUCCESS" if all tests
+passed, or "BUILD FAILURE" if any tests failed. Review the logged output
+to troubleshoot failures.
+
+# Package
+The Maven package goal creates a single uber jar with all dependencies in the standard
+target directory. The project code expects to find this jar and requires it to run. To
+create the uber jar run:
+
+mvn package
+
+# Script / integration testing
+Non-unit test scripts (extract, ingest, merge) should be tested with script test
+runners in src/test/scripts:
+* test_compile.sh - quick syntax check of all shell scripts
+* test_ingest_and_merge.sh - requires a working Hadoop install with Hive and Impala
+* test_metadata.sh - runs various metadata tests. Requires a working Hadoop install.
+* test_process_control.sh - runs process control and logging tests. Requires a working metadata DB.
+
+mvn package is required to build the dependent jar files before running integration tests.
+
+# Deploy, configure and run
+Running mvn package results in a "deployed" instance in the current workspace, which is
+redeployable by archiving the entire directory, copying and unarchiving
+somewhere else.
+
+Packaging and deployment is automated via the bin/iah_build_deploy.sh script, or
+via integration with external CI/CD tools and process. See the iah_user_guide.docx file
+for more details about configuring a deployed
+instance.
+
+# SFDC Data Loader build and package
+The Data Loader utility is used for Salesforce data exports. The jar included in this project
+in the dataloader directory was built from source at https://github.com/forcedotcom/dataloader,
+using the appropriate version branch (e.g., v35).
+
+The dataloader project should be rebuilt when needed for API version changes.
+
+## Data Loader package
+The dataloader project pom.xml doesn't include any remote Maven repositories by default. To build,
+add a repository definition like the following to the repositories section of a cloned repo:
+
+        <repository>
+            <id>spring-plugin-releases</id>
+            <url>http://repo.springsource.org/plugins-release/</url>
+        </repository>
+
+Then follow the rest of the build directions on the GitHub site. The resulting uber jar should
+be moved into the dataloader directory, replacing any existing jar.
+The src/main/scripts/iah_functions.sh entry for the dataloader jar should be updated as well
+with the new path.
+
+## Password encryption
+
+To avoid storing passwords in configuration files in plain text, the framework supports encryption of the password
+configuration properties. All such properties can be encrypted (and decrypted) using a master password. The master
+password is stored in a file available at runtime. The file can be on a local file system and has restricted access.
+
+The URI of the master password file is controlled by the configuration option 'masterPasswordFile'.
+
+The Salesforce client required password and token encryption by the same master password.
+
+If you have installed the JCE Unlimited Strength Policy, you can use strong encryptor with configuration option
+strongPassword=true.
+
+Encrypted passwords can be generated using the CLI password encryptor tool.
+
+$ ./dev/src/main/scripts/encryptor.sh
+
+ -h (-help)                : Usage: java <jar> <cmd> <cmd specific args>
+                               Command <cmd> is one of:
+                                 encr : encrypt
+                                 decr : decrypt
+                                 help : show this help
+                              (default: false)
+ -m (-masterPasswfile) VAL : master password file
+ -p (-passwordFile) VAL    : password file for encryption (default: )
+ -e (-encrPassword) VAL    : encrypted password (default: )
+ -s (-strong)              : use strong encryptor (default: false)
+
+Example for encryption :
+./dev/src/main/scripts/encryptor.sh encr -m /path/to/masterPasswordFile -p /path/to/passwordFile
+
+ENC(lG6TEXTV3fu7HmBWZJsllQ==)
+
+Example for decryption :
+./dev/src/main/scripts/encryptor.sh decr -m /path/to/masterPasswordFile -e 'ENC(lG6TEXTV3fu7HmBWZJsllQ==)'
+
+12345
